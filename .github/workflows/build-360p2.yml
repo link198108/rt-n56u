@@ -1,4 +1,4 @@
-name: Build 360P2 Padavan (Official Config Tool)
+name: Build 360P2 Padavan (Direct Clone)
 on:
   workflow_dispatch:
 
@@ -6,20 +6,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 拉取原作者源码（含完整子模块）
+      - name: 拉取原作者源码（避开你自己仓库的网络问题）
         run: |
-          git clone --depth 1 --recurse-submodules https://github.com/hanwckf/rt-n56u.git .
+          git clone --depth 1 https://github.com/hanwckf/rt-n56u.git .
+          git submodule update --init --recursive
 
       - name: 安装编译依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git ccache gettext libssl-dev xsltproc libxml-parser-perl unzip
 
-      - name: 配置并编译360P2固件（使用官方配置生成器）
+      - name: 配置并编译360P2固件
         run: |
           cd trunk
           make clean
-          ./boards/360P2/build.sh config
+          ./scripts/gen_config.py mt7628 360P2
           make -j$(nproc)
 
       - name: 上传编译好的固件
