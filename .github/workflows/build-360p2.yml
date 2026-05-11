@@ -20,7 +20,7 @@ jobs:
         run: |
           cd trunk
           make clean
-          make defconfig BOARD=360P2
+          ./scripts/gen_config.py mt7628 360P2
           make -j$(nproc)
 
       - name: 上传固件
