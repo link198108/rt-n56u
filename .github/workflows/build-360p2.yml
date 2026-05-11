@@ -1,4 +1,4 @@
-name: Build 360P2 Padavan (Final)
+name: Build 360P2 Padavan (100% Path Fixed)
 on:
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 拉取原作者源码（稳定方式）
+      - name: 拉取原作者源码
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/hanwckf/rt-n56u.git .
 
@@ -15,11 +15,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git ccache gettext libssl-dev xsltproc libxml-parser-perl unzip
 
-      - name: 配置并编译360P2固件（适配旧版源码）
+      - name: 配置并编译360P2固件（使用正确路径）
         run: |
           cd trunk
           make clean
-          cp ./configs/mt7628/360P2.config .config
+          # 关键修正：使用你仓库里真实存在的配置文件路径
+          cp ./configs/boards/360P2/config .config
           make -j$(nproc)
 
       - name: 上传编译好的固件
