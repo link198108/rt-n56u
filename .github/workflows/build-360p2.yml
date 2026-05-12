@@ -1,12 +1,14 @@
 name: build-360p2
-# Controls when the action will run. 
-on: 
+
+on:
   push:
+    branches:
+      - master
   pull_request:
   workflow_dispatch:
     inputs:
       debug_enabled:
-        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'     
+        description: 'Run with tmate debugging'
         required: false
         default: 'no'
   release:
@@ -14,54 +16,72 @@ on:
 
 jobs:
   build:
-    name: build
-    runs-on: ubuntu-20.04
+    name: build-360p2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
     env:
       build_variant: mt7628
-      targets: 360P2
+      targets: "360P2"
       images_dir: /opt/images
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Prepare environment
         run: |
-          sudo apt update
-          sudo apt install libtool-bin gperf python3-docutils autopoint gettext
+          sudo apt update -y
+          sudo apt install -y libtool-bin gperf python3-docutils autopoint gettext p7zip-full
+
       - name: Run shellcheck
         run: sh ./trunk/tools/shellcheck.sh
+
       - name: Prepare toolchain
         run: |
           cd toolchain-mipsel
           sh dl_toolchain.sh
+
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled == 'yes' }}
         with:
           limit-access-to-actor: true
-      - name: Start build
+
+      - name: Build 360P2 firmware
         run: |
           cd trunk
           mkdir -p ${images_dir}
-          for m in $targets; do fakeroot ./build_firmware_ci $m; \
-          if [ $? = 0 ]; then cp -f images/*.trx ${images_dir}/$m.trx; else exit 1; fi; \
-          ./clear_tree_simple >/dev/null 2>&1; done
+          echo "===== Building 360P2 ====="
+          fakeroot ./build_firmware_ci 360P2
+          if [ $? -eq 0 ]; then
+            cp -f images/*.trx ${images_dir}/360P2.trx
+          else
+            echo "ERROR: Build 360P2 failed"
+            exit 1
+          fi
+          ./clear_tree_simple >/dev/null 2>&1
+
       - name: Create archive
         if: ${{ github.event_name != 'release' && success() }}
         run: |
           ls -lh ${images_dir}
-          GIT_VERSION=`git rev-parse --short=7 HEAD 2>/dev/null` && [ -n "$GIT_VERSION" ] && \
-          image_name=images_mt7628_${GIT_VERSION} || image_name=images_mt7628
-          cd ${images_dir}; md5sum *.trx |tee md5sum.txt; 7z a -mx=9 ${image_name}.7z ./*
+          GIT_VERSION=$(git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+          image_name=360P2_firmware_${GIT_VERSION}
+          cd ${images_dir}
+          md5sum *.trx | tee md5sum.txt
+          7z a -mx=9 ${image_name}.7z ./*
           echo "image_name=${image_name}" >> $GITHUB_ENV
+
       - name: Upload images to Artifact
         if: ${{ github.event_name != 'release' && success() }}
-        uses: actions/upload-artifact@v2.2.1
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.image_name }}
           path: ${{ env.images_dir }}/*.7z
+
       - name: Upload images to Releases
         if: ${{ github.event_name == 'release' && success() }}
-        uses: svenstaro/upload-release-action@2.2.0
+        uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.images_dir }}/*.trx
