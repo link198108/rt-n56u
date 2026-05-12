@@ -1,41 +1,83 @@
-name: Build 360P2 Padavan (Last Resort)
-on:
-  workflow_dispatch:
+name: build-360p2
 
+# Controls when the action will run. 
+on: 
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'     
+        required: false
+        default: 'no'
+  release:
+    types: [published]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: build
+    runs-on: ubuntu-20.04
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      build_variant: ${{ matrix.build_variant }}
+      targets: ${{ matrix.targets }}
+      images_dir: /opt/images
+    strategy:
+      matrix:
+        include:
+          - build_variant: "mt7620"
+            targets: "PSG1208 PSG1218 NEWIFI-MINI MI-MINI MI-3 OYE-001 5K-W20"
+          - build_variant: "mt7628"
+            targets: "HC5861B MI-NANO MZ-R13 MZ-R13P 360P2 HC5761A HC5661A"
+          - build_variant: "mt7621"
+            targets: "K2P_nano K2P DIR-878 RM2100 CR660x"
+          - build_variant: "mt7621-usb"
+            targets: "XY-C1 JCG-836PRO JCG-AC860M JCG-Y2 DIR-882 A3004NS MSG1500 WR1200JS MI-R3G NEWIFI3 B70"
     steps:
-      # 1. 直接从原作者仓库拉取完整源码（含子模块）
-      - name: 拉取完整源码
+      - uses: actions/checkout@v2
+      - name: Prepare environment
         run: |
-          git clone --depth 1 --recurse-submodules https://github.com/hanwckf/rt-n56u.git .
-
-      # 2. 安装所有依赖（确保编译环境完整）
-      - name: 安装编译依赖
+          sudo apt update
+          sudo apt install libtool-bin gperf python3-docutils autopoint gettext
+      - name: Run shellcheck
+        run: sh ./trunk/tools/shellcheck.sh
+      - name: Prepare toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git ccache gettext libssl-dev xsltproc libxml-parser-perl unzip
-
-      # 3. 手动强制生成.config文件，绕开所有路径/脚本问题
-      - name: 强制生成配置并编译
+          cd toolchain-mipsel
+          sh dl_toolchain.sh
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled == 'yes' }}
+        with:
+          limit-access-to-actor: true
+      - name: Start build
         run: |
           cd trunk
-          make clean
-          # 1. 创建空的.config文件，解决"No such file"错误
-          touch .config
-          # 2. 写入360P2的核心平台配置
-          echo "CONFIG_TARGET_ramips=y" >> .config
-          echo "CONFIG_TARGET_mt7620=y" >> .config
-          echo "CONFIG_TARGET_360P2=y" >> .config
-          # 3. 让系统自动补全所有依赖配置，生成完整.config
-          make olddefconfig
-          # 4. 开始编译
-          make -j$(nproc)
-
-      # 4. 上传编译好的固件
-      - name: 上传固件
-        uses: actions/upload-artifact@v4
+          mkdir -p ${images_dir}
+          for m in $targets; do fakeroot ./build_firmware_ci $m; \
+          if [ $? = 0 ]; then cp -f images/*.trx ${images_dir}/$m.trx; else exit 1; fi; \
+          ./clear_tree_simple >/dev/null 2>&1; done
+      - name: Create archive
+        if: ${{ github.event_name != 'release' && success() }}
+        run: |
+          ls -lh ${images_dir}
+          GIT_VERSION=`git rev-parse --short=7 HEAD 2>/dev/null` && [ -n "$GIT_VERSION" ] && \
+          image_name=images_${build_variant}_${GIT_VERSION} || image_name=images_${build_variant}
+          cd ${images_dir}; md5sum *.trx |tee md5sum.txt; 7z a -mx=9 ${image_name}.7z ./*
+          echo "image_name=${image_name}" >> $GITHUB_ENV
+      - name: Upload images to Artifact
+        if: ${{ github.event_name != 'release' && success() }}
+        uses: actions/upload-artifact@v2.2.1
         with:
-          name: 360P2-Padavan-Firmware
-          path: trunk/images/*.trx
+          name: ${{ env.image_name }}
+          path: ${{ env.images_dir }}/*.7z
+      - name: Upload images to Releases
+        if: ${{ github.event_name == 'release' && success() }}
+        uses: svenstaro/upload-release-action@2.2.0
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.images_dir }}/*.trx
+          tag: ${{ github.ref }}
+          overwrite: true
+          file_glob: true
