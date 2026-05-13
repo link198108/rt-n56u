@@ -1,6 +1,5 @@
 name: 7620CI
 
-# 触发方式：保留原来的push/PR，同时给workflow_dispatch加上选择项
 on:
   push:
   pull_request:
@@ -10,6 +9,7 @@ on:
         description: '请选择要编译的设备组'
         required: true
         default: 'mt7620'
+        type: choice
         options:
           - mt7620
           - mt7628
@@ -19,6 +19,10 @@ on:
         description: '是否开启tmate调试（一般选no）'
         required: false
         default: 'no'
+        type: choice
+        options:
+          - no
+          - yes
   release:
     types: [published]
 
@@ -29,12 +33,10 @@ jobs:
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
     env:
       images_dir: /opt/images
-      # 用一个变量存当前选中的组，方便后续用
       selected_group: ${{ github.event.inputs.build_group }}
     steps:
       - uses: actions/checkout@v2
 
-      # 【关键步骤】根据你选的组，赋值对应的设备列表
       - name: 赋值当前要编译的设备列表
         run: |
           case ${{ github.event.inputs.build_group }} in
