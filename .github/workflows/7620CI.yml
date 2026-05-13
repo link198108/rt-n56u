@@ -1,13 +1,13 @@
 name: 7620CI
 
-# Controls when the action will run.
+# 触发方式：保留原来的push/PR，同时给workflow_dispatch加上选择项
 on:
   push:
   pull_request:
   workflow_dispatch:
     inputs:
-      select_build:
-        description: '选择单独编译其中一套'
+      build_group:
+        description: '请选择要编译的设备组'
         required: true
         default: 'mt7620'
         options:
@@ -16,7 +16,7 @@ on:
           - mt7621
           - mt7621-usb
       debug_enabled:
-        description: 'Run the build with tmate debugging enabled'
+        description: '是否开启tmate调试（一般选no）'
         required: false
         default: 'no'
   release:
@@ -29,20 +29,27 @@ jobs:
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
     env:
       images_dir: /opt/images
-    # 不用矩阵并行，手动赋值当前选中的一套
-    strategy:
-      fail-fast: false
+      # 用一个变量存当前选中的组，方便后续用
+      selected_group: ${{ github.event.inputs.build_group }}
     steps:
       - uses: actions/checkout@v2
 
-      # 根据下拉选择 赋值对应设备列表
-      - name: Set target list
+      # 【关键步骤】根据你选的组，赋值对应的设备列表
+      - name: 赋值当前要编译的设备列表
         run: |
-          case ${{ github.event.inputs.select_build }} in
-            mt7620) echo "TARGETS=PSG1208 PSG1218 NEWIFI-MINI MI-MINI MI-3 OYE-001 5K-W20" >> $GITHUB_ENV ;;
-            mt7628) echo "TARGETS=HC5861B MI-NANO MZ-R13 MZ-R13P 360P2 HC5761A HC5661A" >> $GITHUB_ENV ;;
-            mt7621) echo "TARGETS=K2P_nano K2P DIR-878 RM2100 CR660x" >> $GITHUB_ENV ;;
-            mt7621-usb) echo "TARGETS=XY-C1 JCG-836PRO JCG-AC860M JCG-Y2 DIR-882 A3004NS MSG1500 WR1200JS MI-R3G NEWIFI3 B70" >> $GITHUB_ENV ;;
+          case ${{ github.event.inputs.build_group }} in
+            mt7620)
+              echo "targets=PSG1208 PSG1218 NEWIFI-MINI MI-MINI MI-3 OYE-001 5K-W20" >> $GITHUB_ENV
+              ;;
+            mt7628)
+              echo "targets=HC5861B MI-NANO MZ-R13 MZ-R13P 360P2 HC5761A HC5661A" >> $GITHUB_ENV
+              ;;
+            mt7621)
+              echo "targets=K2P_nano K2P DIR-878 RM2100 CR660x" >> $GITHUB_ENV
+              ;;
+            mt7621-usb)
+              echo "targets=XY-C1 JCG-836PRO JCG-AC860M JCG-Y2 DIR-882 A3004NS MSG1500 WR1200JS MI-R3G NEWIFI3 B70" >> $GITHUB_ENV
+              ;;
           esac
 
       - name: Prepare environment
@@ -68,13 +75,13 @@ jobs:
         run: |
           cd trunk
           mkdir -p ${images_dir}
-          for m in ${{ env.TARGETS }}; do
-            echo "正在编译机型: $m"
+          for m in ${{ env.targets }}; do
+            echo "正在编译: $m"
             fakeroot ./build_firmware_ci $m
             if [ $? = 0 ]; then
               cp -f images/*.trx ${images_dir}/$m.trx
             else
-              echo "编译 $m 失败，退出"
+              echo "编译 $m 失败，终止任务"
               exit 1
             fi
             ./clear_tree_simple >/dev/null 2>&1
@@ -85,7 +92,7 @@ jobs:
         run: |
           ls -lh ${images_dir}
           GIT_VERSION=`git rev-parse --short=7 HEAD 2>/dev/null` && [ -n "$GIT_VERSION" ] && \
-          image_name=images_${{ github.event.inputs.select_build }}_${GIT_VERSION} || image_name=images_${{ github.event.inputs.select_build }}
+          image_name=images_${{ env.selected_group }}_${GIT_VERSION} || image_name=images_${{ env.selected_group }}
           cd ${images_dir}; md5sum *.trx |tee md5sum.txt; 7z a -mx=9 ${image_name}.7z ./*
           echo "image_name=${image_name}" >> $GITHUB_ENV
 
